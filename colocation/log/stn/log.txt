@@ -1,0 +1,18 @@
+data:	../KETI_oneweek
+log:	./log/
+window_size:	200
+k_coefficient:	32
+stride:	20
+norm_startpoint:	False
+sub_sample:	False
+interval:	5
+max_length:	130000
+epoch:	1
+batch_size:	32
+optim:	SGD
+learning_rate:	0.0001
+dropout:	0.2
+grad_norm:	0
+weight_decay:	0.0001
+
+time.struct_time(tm_year=2019, tm_mon=9, tm_mday=19, tm_hour=13, tm_min=27, tm_sec=53, tm_wday=3, tm_yday=262, tm_isdst=0)
