@@ -1,2 +1,4 @@
-# Training & Testing
-  python main.py
+## Training & Testing
+```
+python main.py
+```
