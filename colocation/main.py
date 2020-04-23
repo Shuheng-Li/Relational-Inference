@@ -7,8 +7,8 @@ import random
 import utils.util as utils
 import numpy as np
 from Data import *
-from models import *
-from losses import *
+from models import STN
+from losses import tripletLoss, combLoss
 import scipy.io as scio
 from scipy.spatial.distance import pdist
 from scipy.spatial.distance import squareform
@@ -26,15 +26,13 @@ sys.path.insert(0, parent_dir)
 def parse_args():
     parser = argparse.ArgumentParser(description='main.py')
     parser.add_argument('-config', default = 'stn', type =str)
-    parser.add_argument('-task', default = 'colocation', type = str,
-                        choices=['colocation', 'coequipment'])
     parser.add_argument('-model', default='stn', type=str,
                         choices=['stn'])
-    parser.add_argument('-loss', default='angular', type=str,
-                        choices=['triplet', 'angular'])
+    parser.add_argument('-loss', default='comb', type=str,
+                        choices=['triplet', 'comb'])
     parser.add_argument('-seed', default=2, type=int,
                         help="Random seed")
-    parser.add_argument('-log', default='han', type=str,
+    parser.add_argument('-log', default='stn', type=str,
                         help="Log directory")
     parser.add_argument('-facility', default=10606, type=int,
                         help="Log directory")
@@ -68,31 +66,6 @@ def set_up_logging():
 
 logging, logging_result, log_path = set_up_logging()
 
-def test_coequipment(model, ahu_x, test_vav, ahu_y, test_y, mapping):
-    model.eval()
-    with torch.no_grad():
-        vav_out = model(torch.from_numpy(np.array(test_vav)).cuda())
-        ahu_out = model(torch.from_numpy(np.array(ahu_x)).cuda())
-
-    vav_out = vav_out.cpu().tolist()
-    ahu_out = ahu_out.cpu().tolist()
-
-    total = len(vav_out)
-    cnt = 0
-    for i, vav_emb in enumerate(vav_out):
-        min_dist = 0xffffff
-        min_idx = 0
-        for j, ahu_emb in enumerate(ahu_out):
-            dist = np.linalg.norm(np.array(ahu_emb) - np.array(vav_emb))
-            if dist < min_dist:
-                min_dist = dist
-                min_idx = j
-        if mapping[test_y[i]] == ahu_y[min_idx]:
-            print(i, min_idx)
-            cnt += 1
-        print(test_y[i], ahu_y[min_idx])
-    acc = cnt / total
-    return acc
 
 
 def test_colocation(test_x, test_y, model, fold, split):
@@ -140,20 +113,14 @@ def test_colocation(test_x, test_y, model, fold, split):
 def main():
 
     # read data & STFT
+    logging(str(time.asctime( time.localtime(time.time()) )))
 
-    logging(str(time.localtime()))
-    if args.task == 'colocation':
-        x, y, true_pos = read_colocation_data(config)
-        x = STFT(x, config)
-        logging("%d total sensors, %d frequency coefficients, %d windows\n" % (len(x), x[0].shape[0], x[0].shape[1]))
+    x, y, true_pos = read_colocation_data(config)
+    x = STFT(x, config)
+    logging("%d total sensors, %d frequency coefficients, %d windows\n" % (len(x), x[0].shape[0], x[0].shape[1]))
 
-    elif args.task == 'coequipment':
-        pass
 
-    if args.task == 'colocation':
-        test_indexes = cross_validation_sample(50, 10)
-    elif args.task == 'coequipment':
-        pass
+    test_indexes = cross_validation_sample(50, 10)
 
     print("test indexes:\n", test_indexes)
 
@@ -165,25 +132,20 @@ def main():
         logging("Now training fold: %d" %(fold))
 
         # split training & testing
-
-        if args.task == 'colocation':
-            print("Test indexes: ", test_index)
-            train_x, train_y, test_x, test_y = split_colocation_train(x, y, test_index, args.split)
-            train_x = gen_colocation_triplet(train_x, train_y)
-        elif args.task == 'coequipment':
-            pass
+        print("Test indexes: ", test_index)
+        train_x, train_y, test_x, test_y = split_colocation_train(x, y, test_index, args.split)
+        train_x = gen_colocation_triplet(train_x, train_y)
 
         total_triplets = len(train_x)
         logging("Total training triplets: %d\n" % (total_triplets))
-        print(test_y)
         
         if args.loss == 'triplet':
             criterion = tripletLoss(margin = 1).cuda()
-        elif args.loss == 'angular':
-            criterion = angularLoss(margin = 1).cuda()
+        elif args.loss == 'comb':
+            criterion = combLoss(margin = 1).cuda()
 
         if args.model == 'stn':
-            model = STN(config.dropout).cuda()
+            model = STN(config.dropout, 2 * config.k_coefficient).cuda()
 
         if config.optim == 'SGD':
             optimizer = torch.optim.SGD(model.parameters(), lr = config.learning_rate, momentum = 0.9, weight_decay = config.weight_decay)
@@ -197,9 +159,9 @@ def main():
 
         print("Model : ", model)
         print("Criterion : ", criterion)
-
+        train_loader = torch.utils.data.DataLoader(train_x, batch_size = config.batch_size, shuffle = True)
         for epoch in range(config.epoch):
-            train_loader = torch.utils.data.DataLoader(train_x, batch_size = config.batch_size, shuffle = True)
+            
             logging("Now training %d epoch ......\n" % (epoch + 1))
             total_triplet_correct = 0
             for step, batch_x in enumerate(train_loader):
@@ -226,25 +188,21 @@ def main():
 
             logging("Triplet accuracy: %f" % (total_triplet_correct/total_triplets))
 
-            torch.save(model, log_path + args.task + '_' + args.model + '_model.pkl')
 
-            if args.task == 'colocation':
-                solution, recall, room_wise_acc = test_colocation(test_x, test_y, model, fold, args.split)
-                solution = solution.tolist()
+            solution, recall, room_wise_acc = test_colocation(test_x, test_y, model, fold, args.split)
+            solution = solution.tolist()
 
-                logging_result("fold: %d, epoch: %d\n" % (fold, epoch))
-                logging_result("Acc: %f\n" %(recall))
-                logging("fold: %d, epoch: %d\n" % (fold, epoch))
-                logging("Acc: %f\n" %(recall))
+            logging_result("fold: %d, epoch: %d\n" % (fold, epoch))
+            logging_result("Acc: %f\n" %(recall))
+            logging("fold: %d, epoch: %d\n" % (fold, epoch))
+            logging("Acc: %f\n" %(recall))
 
-                for k in range(len(solution)):
-                    for j in range(len(solution[k])):
-                        logging_result(str(solution[k][j]) + ' ')
-                    logging_result('\n')
+            for k in range(len(solution)):
+                for j in range(len(solution[k])):
+                    logging_result(str(solution[k][j]) + ' ')
                 logging_result('\n')
+            logging_result('\n')
 
-            elif args.task == 'coequipment':
-                pass
 
         fold_recall.append(recall)
         fold_room_acc.append(room_wise_acc)

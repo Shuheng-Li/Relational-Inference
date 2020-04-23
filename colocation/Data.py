@@ -130,10 +130,7 @@ def read_csv(path, config):
         t, v = line.split(",")
         timestamps.append(int(t))
         vals.append(float(v))
-    if config.sub_sample == True:
-        return sub_sample(timestamps, vals, config)
-    else:
-        return align_length(timestamps, vals, config.max_length)
+    return align_length(timestamps, vals, config.max_length)
 
 def sub_sample(ts, val, config):
     sample_f = config.interval

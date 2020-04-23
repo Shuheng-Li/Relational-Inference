@@ -4,7 +4,7 @@ from torch.autograd import Variable
 
 class STN(nn.Module):
     def __init__(self, dropout_rate, input_channels):
-        super(stn, self).__init__()
+        super(STN, self).__init__()
         self.d = dropout_rate
 
         self.conv1 = nn.Sequential( 

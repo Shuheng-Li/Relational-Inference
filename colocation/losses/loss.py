@@ -18,9 +18,9 @@ class tripletLoss(nn.Module):
         return (d_pos < d_neg).sum()
 
 
-class angularLoss(nn.Module):
+class combLoss(nn.Module):
     def __init__(self, margin, l = 1):
-        super(angularLoss, self).__init__()
+        super(combLoss, self).__init__()
         self.margin = margin
         self.l = l
 
